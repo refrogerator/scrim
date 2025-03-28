@@ -9,32 +9,24 @@ module Main where
 import Network.Socket qualified as NS
 import Network.Socket.ByteString.Lazy (sendAll, recv, sendWithFds)
 import qualified Data.ByteString.Lazy as B
-import qualified Data.ByteString.Builder as BL
-import qualified Data.ByteString.Char8 as SB
 import System.Environment (getEnv)
 import Data.Binary.Put
 import Data.Binary.Get
-import Data.Bits ((.|.), shiftR)
-import Data.Int (Int32)
+import Data.Bits (shiftR)
 import Data.Word (Word8, Word16, Word32)
-import Data.ByteString (ByteString, unpack)
-import Control.Monad (forever, replicateM_, void, replicateM, unless, when)
+import Data.ByteString (ByteString)
+import Control.Monad (forever, replicateM_, void, unless, when)
 import Data.Map hiding (map, foldl')
 import Lens.Micro.Platform
 import Control.Monad.State (StateT, evalStateT, MonadIO (liftIO))
-import Data.Foldable (for_, foldlM, Foldable (foldl', fold), traverse_, find, sequenceA_)
-import Text.Printf (printf)
+import Data.Foldable (sequenceA_, find)
 import Foreign.C (CString, newCString)
-import System.Posix.Internals (c_ftruncate, FD)
 import System.Posix.Types (Fd)
-import Foreign (ForeignPtr, nullFunPtr, nullPtr, Ptr, free, Storable (peek, poke), plusPtr)
-import SharedMemory (openSharedMemory)
-import Network.Socket (sendFd)
-import Control.Applicative (Applicative(liftA2), liftA3)
-import Data.Traversable (for)
+import Foreign (nullPtr, Ptr, free, Storable (peek, poke), plusPtr)
 import System.Exit (exitSuccess)
 import Codec.Picture (withImage, PixelRGB8 (PixelRGB8), DynamicImage (ImageRGB8))
 import Codec.Picture.Saving (imageToPng)
+import Control.Applicative (liftA3)
 
 foreign import ccall "shm_open" shmOpen :: CString -> Int -> Int -> IO Int
 foreign import ccall "shm_unlink" shmUnlink :: CString -> IO Int
@@ -150,7 +142,7 @@ makeLenses ''ClientState
 
 handleErrorMsg :: B.ByteString -> Client ()
 handleErrorMsg msg = do
-    let (object, errorId, message) = runGet readErrorMsg msg
+    let (_object, _errorId, message) = runGet readErrorMsg msg
     liftIO $ putStrLn $ "ERROR: " <> show message
 
 handleGlobalMsg :: B.ByteString -> Client ()
@@ -350,7 +342,7 @@ noInitHandler _ = pure ()
 
 wlrSurfaceConfigure :: ObjectId -> ObjectId -> B.ByteString -> Client ()
 wlrSurfaceConfigure fb o str = do
-    let (s, w, h) = runGet (liftA3 (,,) getWord32host getWord32host getWord32host) str
+    let (s, _w, _h) = runGet (liftA3 (,,) getWord32host getWord32host getWord32host) str
 
     -- liftIO $ print (s, w, h)
 
@@ -377,7 +369,7 @@ writePPM c d = do
 
     sp <- use $ userState . copyBuffer
 
-    (swidth, sheight) <- use $ userState . outputSize
+    (swidth, _) <- use $ userState . outputSize
 
     let getPixel o' x y = do
             let o = ((x + (y * swidth)) * 4) + o'
@@ -427,7 +419,7 @@ wlrScreencopyManagerHandler o = do
         putInt32host 0
         putWord32host $ fromIntegral op
 
-    objects %= insert cur (fromList [(0, \s -> do
+    objects %= insert cur (fromList [(0, \_ -> do
             -- liftIO $ print $ runGet (do
             --         f <- getWord32host
             --         w <- getWord32host
