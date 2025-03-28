@@ -1,0 +1,6 @@
+get registry
+sync
+
+bind to seat
+get seat name
+submit command to river
