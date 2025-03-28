@@ -539,6 +539,9 @@ wlSeatHandler o = do
                     writePPM ip cursor
                     liftIO exitSuccess
 
+                -- exit on right click
+                (273, 1) -> liftIO exitSuccess
+
                 _ -> pure ()
 
             -- liftIO $ print cursor
