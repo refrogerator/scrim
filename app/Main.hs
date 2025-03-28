@@ -156,7 +156,7 @@ handleErrorMsg msg = do
 handleGlobalMsg :: B.ByteString -> Client ()
 handleGlobalMsg msg = do
     let gm = runGet readGlobalMsg msg
-    liftIO $ putStrLn $ "object " <> show gm._name <> " supporting interface " <> show gm._interface <> " found at version " <> show gm._version
+    -- liftIO $ putStrLn $ "object " <> show gm._name <> " supporting interface " <> show gm._interface <> " found at version " <> show gm._version
     registry %= insert gm._interface (fromIntegral gm._name)
     -- handlers' <- use handlers
     -- for_ (handlers' !? gm._interface) (\(v, i, o) -> writeBind (fromIntegral gm._name) (B.fromStrict gm._interface) v o >>= i)
@@ -229,8 +229,8 @@ writeBind :: ObjectId -> B.ByteString -> Int -> Client ObjectId
 writeBind n interface version = do
     cur <- newId
 
-    liftIO $ putStrLn $ "INFO: binding to " <> show interface <> " version " <> show version
-    liftIO $ putStrLn $ "INFO: allocating object id " <> show cur
+    -- liftIO $ putStrLn $ "INFO: binding to " <> show interface <> " version " <> show version
+    -- liftIO $ putStrLn $ "INFO: allocating object id " <> show cur
 
     registryId' <- use $ userState . registryId
 
@@ -292,7 +292,7 @@ createFdBuffer fileSize = do
 
     fd <- shmOpen path 194 0o600 -- O_RDWR | O_EXCL | O_CREAT
 
-    print fd
+    -- print fd
 
     unlinkRes <- shmUnlink path -- TODO: handle errors
     truncateRes <- ftruncate fd fileSize
@@ -337,13 +337,13 @@ createBuffer offset width height format = do
 wlShmHandler :: ObjectId -> Client ()
 wlShmHandler o = userState . wlShm .= o
 
-getModeInfo :: Get String
-getModeInfo = do
-    _ <- getWord32host
-    width <- getInt32host
-    height <- getInt32host
-    refresh <- getInt32host
-    pure $ printf "%vx%v@%v" width height (fromIntegral @Int32 @Float refresh / 1000.0)
+-- getModeInfo :: Get String
+-- getModeInfo = do
+--     _ <- getWord32host
+--     width <- getInt32host
+--     height <- getInt32host
+--     refresh <- getInt32host
+--     pure $ printf "%vx%v@%v" width height (fromIntegral @Int32 @Float refresh / 1000.0)
 
 noInitHandler :: ObjectId -> Client ()
 noInitHandler _ = pure ()
@@ -352,7 +352,7 @@ wlrSurfaceConfigure :: ObjectId -> ObjectId -> B.ByteString -> Client ()
 wlrSurfaceConfigure fb o str = do
     let (s, w, h) = runGet (liftA3 (,,) getWord32host getWord32host getWord32host) str
 
-    liftIO $ print (s, w, h)
+    -- liftIO $ print (s, w, h)
 
     -- ack_configure
     writeMsg o 6 $ putWord32host s
@@ -388,7 +388,9 @@ writePPM c d = do
 
     image <- liftIO $ withImage width height $ getPixel $ (fst start + (snd start * swidth)) * 4
 
-    liftIO $ B.writeFile "test.png" $ imageToPng $ ImageRGB8 image
+    liftIO $ B.putStr $ imageToPng $ ImageRGB8 image
+
+    -- liftIO $ B.writeFile "/tmp/screenshot.png" $ imageToPng $ ImageRGB8 image
 
 copyBuf :: Client ()
 copyBuf = do
@@ -418,7 +420,7 @@ wlrScreencopyManagerHandler o = do
 
     op <- use $ userState . output
 
-    liftIO $ putStrLn "INFO: setting buffer"
+    -- liftIO $ putStrLn "INFO: setting buffer"
 
     writeMsg o 0 $ do
         putWord32host $ fromIntegral cur
@@ -426,14 +428,14 @@ wlrScreencopyManagerHandler o = do
         putWord32host $ fromIntegral op
 
     objects %= insert cur (fromList [(0, \s -> do
-            liftIO $ print $ runGet (do
-                    f <- getWord32host
-                    w <- getWord32host
-                    h <- getWord32host
-                    st <- getWord32host
-                    pure (f, w, h, st)
-                ) s
-            liftIO $ putStrLn "INFO: setting buffer PART 2"
+            -- liftIO $ print $ runGet (do
+            --         f <- getWord32host
+            --         w <- getWord32host
+            --         h <- getWord32host
+            --         st <- getWord32host
+            --         pure (f, w, h, st)
+            --     ) s
+            -- liftIO $ putStrLn "INFO: setting buffer PART 2"
 
             (width, height) <- use $ userState . outputSize
 
@@ -485,7 +487,7 @@ wlrLayerShellHandler o = do
 wlSeatHandler :: ObjectId -> Client ()
 wlSeatHandler o = do
     objects %= insert o (fromList [(1, \v -> do
-                liftIO $ SB.putStrLn $ runGet readString v
+                -- liftIO $ SB.putStrLn $ runGet readString v
                 userState . seatName .= B.toStrict v
             )])
 
@@ -511,7 +513,7 @@ wlSeatHandler o = do
                     ) v
             -- 272 == BTN_LEFT
             -- 273 == BTN_RIGHT
-            liftIO $ print ms
+            -- liftIO $ print ms
 
             cursor <- use $ userState . cursorPos
 
@@ -519,13 +521,13 @@ wlSeatHandler o = do
                 (272, 1) -> userState . initialCursorPos .= cursor
                 (272, 0) -> do
                     ip <- use $ userState . initialCursorPos
-                    liftIO $ print (ip, cursor)
+                    -- liftIO $ print (ip, cursor)
                     writePPM ip cursor
                     liftIO exitSuccess
 
                 _ -> pure ()
 
-            liftIO $ print cursor
+            -- liftIO $ print cursor
         )
         , (2, \v -> do
             let cursor = runGet (do
@@ -555,7 +557,7 @@ initClient = do
                         width <- getInt32host
                         height <- getInt32host
                         pure (fromIntegral width, fromIntegral height)) v)
-                , (4, liftIO . SB.putStrLn . runGet readString)
+                -- , (4, liftIO . SB.putStrLn . runGet readString)
                 ])
     bindToGlobal "wl_seat" 9 >>= wlSeatHandler
     bindToGlobal "wl_compositor" 6 >>= wlCompositorHandler
@@ -570,7 +572,7 @@ runClient = do
     runtimeDir <- getEnv "XDG_RUNTIME_DIR"
     waylandDisplay <- getEnv "WAYLAND_DISPLAY"
     let waylandPath = runtimeDir <> "/" <> waylandDisplay
-    putStrLn $ "connecting to " <> waylandPath
+    -- putStrLn $ "connecting to " <> waylandPath
     NS.connect sock $ NS.SockAddrUnix waylandPath
 
     -- create registry
@@ -581,7 +583,7 @@ runClient = do
     
     globs <- handleInitialMessages sock 3
 
-    traverse_ (\gm -> putStrLn $ "object " <> show gm._name <> " supporting interface " <> show gm._interface <> " found at version " <> show gm._version)  globs
+    -- traverse_ (\gm -> putStrLn $ "object " <> show gm._name <> " supporting interface " <> show gm._interface <> " found at version " <> show gm._version)  globs
 
     evalStateT initClient $ ClientState 4 empty empty globs sock (UserState 2 "" 0 0 0 (0, 0) 0 0 0 nullPtr nullPtr 0 (0, 0) (0, 0) False)
 
