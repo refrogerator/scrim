@@ -491,6 +491,20 @@ wlSeatHandler o = do
                 userState . seatName .= B.toStrict v
             )])
 
+    keyboard <- newId
+
+    -- get_keyboard
+    writeMsg o 1 $ putWord32host $ fromIntegral keyboard
+
+    objects %= insert keyboard (fromList [(3, \v -> do
+                let key = runGet (do
+                        _s <- getWord32host
+                        _t <- getWord32host
+                        getWord32host) v
+                liftIO $ when (key == 0x1) -- escape
+                    exitSuccess
+                )])
+
     pointer <- newId
 
     -- get_pointer
