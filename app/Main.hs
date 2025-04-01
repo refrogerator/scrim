@@ -3,6 +3,7 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE ForeignFunctionInterface #-}
+{-# LANGUAGE PatternSynonyms #-}
 
 module Main where
 
@@ -50,7 +51,7 @@ writeString s = do
     putLazyByteString s
     putWord8 0
     -- traceM (show $ fromIntegral (alignInt (l + 1) 4 - (l + 1)))
-    replicateM_ (fromIntegral (alignInt (l + 1) 4 - (l + 1))) (putWord8 0)
+    replicateM_ (fromIntegral $ alignInt (l + 1) 4 - (l + 1)) (putWord8 0)
 
 readString :: Get ByteString
 readString = do
@@ -60,12 +61,10 @@ readString = do
     pure s
 
 readMsg :: Get MessageHeader
-readMsg = do
-    o <- getWord32host
-    m <- getWord16host
-    s <- getWord16host
-
-    pure $ MessageHeader o m s
+readMsg = liftA3 MessageHeader
+    getWord32host
+    getWord16host
+    getWord16host
 
 getRegistry :: ObjectId -> Put
 getRegistry r = do
@@ -74,18 +73,11 @@ getRegistry r = do
     putInt16host $ 8 + 4 -- size
     putInt32host $ fromIntegral r -- new id for registry object
 
-data GlobalMsg = GlobalMsg
-    { name      :: Word32
-    , interface :: ByteString
-    , version   :: Word32
-    } deriving Show
-
 readGlobalMsg :: Get Global
-readGlobalMsg = do
-    name <- getWord32host -- 4
-    s <- readString -- 16
-    v <- getWord32host -- 4
-    pure $ Global s (fromIntegral name) (fromIntegral v)
+readGlobalMsg = liftA3 Global 
+    (fromIntegral <$> getWord32host) 
+    readString 
+    (fromIntegral <$> getWord32host)
 
 readErrorMsg :: Get (ObjectId, Int, ByteString)
 readErrorMsg = do
@@ -116,15 +108,15 @@ data UserState = UserState
     , _shmPool :: ObjectId
     , _copyBuffer :: Ptr Int
     , _framebuffer :: Ptr Int
-    , _serial :: Word32
+    , _screenshotFormat :: Word32
     , _cursorPos :: (Int, Int)
     , _initialCursorPos :: (Int, Int)
     , _lock :: Bool
     }
 
 data Global = Global 
-    { _interface :: ByteString
-    , _name :: ObjectId
+    { _name :: ObjectId
+    , _interface :: ByteString
     , _version :: Int
     } deriving Show
     
@@ -294,7 +286,7 @@ createFdBuffer fileSize = do
     filePtr <- mmap nullPtr fileSize (1 + 2) 1 fd 0 -- PROT_READ + PROT_WRITE, MAP_SHARED
     pure (fromIntegral fd, filePtr)
 
-createBuffer :: Int -> Int -> Int -> Word -> Client (ObjectId, Fd, Ptr Int)
+createBuffer :: Int -> Int -> Int -> Word32 -> Client (ObjectId, Fd, Ptr Int)
 createBuffer offset width height format = do
     pool <- newId
 
@@ -322,7 +314,7 @@ createBuffer offset width height format = do
         putInt32host $ fromIntegral width
         putInt32host $ fromIntegral height
         putInt32host $ fromIntegral stride
-        putWord32host $ fromIntegral format
+        putWord32host format
 
     pure (cur, fd, filePtr)
 
@@ -362,10 +354,10 @@ wlrSurfaceConfigure fb o str = do
 
 writePPM :: (Int, Int) -> (Int, Int) -> Client ()
 writePPM c d = do
-    let start  = min c d
-        end    = max c d
-        width  = fst end - fst start + 1
-        height = snd end - snd start + 1
+    let (startX, startY) = min c d
+        (endX, endY)     = max c d
+        width  = endX - startX + 1
+        height = endY - startY + 1
 
     sp <- use $ userState . copyBuffer
 
@@ -378,31 +370,59 @@ writePPM c d = do
             b <- peek @Word8 $ plusPtr sp (o + 2)
             pure $ PixelRGB8 r g b
 
-    image <- liftIO $ withImage width height $ getPixel $ (fst start + (snd start * swidth)) * 4
+    image <- liftIO $ withImage width height $ getPixel $ (startX + (startY * swidth)) * 4
 
     liftIO $ B.putStr $ imageToPng $ ImageRGB8 image
 
     -- liftIO $ B.writeFile "/tmp/screenshot.png" $ imageToPng $ ImageRGB8 image
 
+pattern ARGB8888 :: Word32
+pattern ARGB8888 = 0x0
+
+pattern XRGB8888 :: Word32
+pattern XRGB8888 = 0x1
+
+pattern XBGR8888 :: Word32
+pattern XBGR8888 = 0x34324258
+
+pattern ABGR8888 :: Word32
+pattern ABGR8888 = 0x34324241
+
 copyBuf :: Client ()
 copyBuf = do
     fb <- use $ userState . framebuffer
     cb <- use $ userState . copyBuffer
+    format <- use $ userState . screenshotFormat
 
     (swidth, sheight) <- use $ userState . outputSize
 
-    let setPixel p x y (r, g, b) = do
+    let setPixelXRGB p x y (r, g, b) = do
             let o = (x + (y * swidth)) * 4
-            poke @Word8 (plusPtr p (o + 1)) r
-            poke @Word8 (plusPtr p (o + 0)) g
-            poke @Word8 (plusPtr p (o + 2)) b
+            poke @Word8 (plusPtr p (o + 2)) r
+            poke @Word8 (plusPtr p (o + 1)) g
+            poke @Word8 (plusPtr p (o + 0)) b
+        setPixel = setPixelXRGB
 
-    let getPixel p x y = do
+    let getPixelXBGR p x y = do
             let o = (x + (y * swidth)) * 4
-            r <- peek @Word8 $ plusPtr p (o + 1)
-            g <- peek @Word8 $ plusPtr p (o + 2)
+            r <- peek @Word8 $ plusPtr p (o + 0)
+            g <- peek @Word8 $ plusPtr p (o + 1)
+            b <- peek @Word8 $ plusPtr p (o + 2)
+            pure (r, g, b)
+
+        getPixelXRGB p x y = do
+            let o = (x + (y * swidth)) * 4
+            r <- peek @Word8 $ plusPtr p (o + 2)
+            g <- peek @Word8 $ plusPtr p (o + 1)
             b <- peek @Word8 $ plusPtr p (o + 0)
             pure (r, g, b)
+
+        getPixel = case format of
+            ARGB8888 -> getPixelXRGB
+            XRGB8888 -> getPixelXRGB
+            ABGR8888 -> getPixelXBGR
+            XBGR8888 -> getPixelXBGR
+            _ -> error "unsupported format"
             
     liftIO $ sequenceA_ $ (\y x -> getPixel cb x y >>= setPixel fb x y) <$> [0..sheight - 1] <*> [0..swidth - 1]
 
@@ -419,20 +439,17 @@ wlrScreencopyManagerHandler o = do
         putInt32host 0
         putWord32host $ fromIntegral op
 
-    objects %= insert cur (fromList [(0, \_ -> do
-            -- liftIO $ print $ runGet (do
-            --         f <- getWord32host
-            --         w <- getWord32host
-            --         h <- getWord32host
-            --         st <- getWord32host
-            --         pure (f, w, h, st)
-            --     ) s
+    objects %= insert cur (fromList [(0, \s -> do
+            let (f, _w, _h, _st) = runGet ((,,,) <$> getWord32host <*> getWord32host <*> getWord32host <*> getWord32host) s
+
             -- liftIO $ putStrLn "INFO: setting buffer PART 2"
 
             (width, height) <- use $ userState . outputSize
 
             -- format: xbgr8888
-            (buf, _, ptr) <- createBuffer 0 width height 0x34324258
+            (buf, _, ptr) <- createBuffer 0 width height f
+
+            userState . screenshotFormat .= f
 
             userState . copyBuffer .= ptr
 
@@ -466,9 +483,7 @@ wlrLayerShellHandler o = do
 
     (width, height) <- use $ userState . outputSize
 
-    -- create buffers
-    -- format: xrgb8888
-    (fb, _, ptr) <- createBuffer 0 (fromIntegral width) (fromIntegral height) 1
+    (fb, _, ptr) <- createBuffer 0 (fromIntegral width) (fromIntegral height) XRGB8888
 
     userState . framebuffer .= ptr
 
